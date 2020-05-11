@@ -21,6 +21,7 @@ permalink: /docs/en-US/changelog/
 * Removed Ubuntu news MOTD
 * Support for vagrant-hostmanager
 * Bumped MariaDB sources from 10.3 to 10.4
+* Support for new plugin `vagrant-goodhosts` to replace in the future `vagrant-hostsupdater`
 
 ### Bug Fixes
 
