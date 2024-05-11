@@ -8,6 +8,8 @@ VAGRANTFILE_API_VERSION = "2"
 Vagrant.require_version '>= 2.2.4'
 require 'yaml'
 require 'fileutils'
+require 'pathname'
+require 'socket'
 
 def sudo_warnings
   red = "\033[38;5;9m" # 124m"
@@ -215,9 +217,9 @@ defaults['memory'] = 2048
 defaults['cores'] = 1
 defaults['provider'] = 'virtualbox'
 
-# if Arm default to parallels
+# if Arm default to docker
 if Etc.uname[:version].include? 'ARM64'
-  defaults['provider'] = 'parallels'
+  defaults['provider'] = 'docker'
 end
 
 # This should rarely be overridden, so it's not included in the config/default-config.yml file.
@@ -227,6 +229,26 @@ vvv_config['vm_config'] = defaults.merge(vvv_config['vm_config'])
 vvv_config['hosts'] = vvv_config['hosts'].uniq
 
 vvv_config['vagrant-plugins'] = {} unless vvv_config['vagrant-plugins']
+
+# Early mapping of the hosts to be added.
+vvv_config['utilities'].each do |name, extensions|
+  extensions = {} unless extensions.is_a? Array
+  extensions.each do |extension|
+    if extension == 'tideways'
+      vvv_config['hosts'] += ['tideways.vvv.test']
+      vvv_config['hosts'] += ['xhgui.vvv.test']
+    end
+  end
+end
+vvv_config['extensions'].each do |name, extensions|
+  extensions = {} unless extensions.is_a? Array
+  extensions.each do |extension|
+    if extension == 'tideways'
+      vvv_config['hosts'] += ['tideways.vvv.test']
+      vvv_config['hosts'] += ['xhgui.vvv.test']
+    end
+  end
+end
 
 # Create a global variable to use in functions and classes
 $vvv_config = vvv_config
@@ -297,12 +319,17 @@ if show_logo
     provider_meta = VagrantPlugins::ProviderVirtualBox::Driver::Meta.new()
     provider_version = provider_meta.version
   when 'parallels'
-    provider_meta = VagrantPlugins::Parallels::Driver::Meta.new()
-    provider_version = provider_meta.version
+    provider_version = '?'
+    if defined? VagrantPlugins::Parallels
+      provider_meta = VagrantPlugins::Parallels::Driver::Meta.new()
+      provider_version = provider_meta.version
+    end
   when 'vmware'
     provider_version = '??'
   when 'hyperv'
     provider_version = 'n/a'
+  when 'docker'
+    provider_version = VagrantPlugins::DockerProvider::Driver.new.execute("docker", "-v").gsub("Docker version ", "")
   else
     provider_version = '??'
   end
@@ -329,6 +356,18 @@ ENV['LC_ALL'] = 'en_US.UTF-8'
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # VirtualBox
   config.vm.provider :virtualbox do |v|
+    unless Vagrant::Util::Platform.windows?
+      if Process.uid == 0
+        machine_id_file=Pathname.new(".vagrant/machines/default/virtualbox/id")
+        unless machine_id_file.exist?()
+          puts "#{red} ⚠ DANGER VAGRANT IS RUNNING AS ROOT/SUDO, DO NOT USE SUDO ⚠#{creset}"
+          puts " ! VVV has detected that the VM has not been created yet, and is running as root/sudo."
+          puts " ! Do not use sudo with VVV, do not run VVV as a root user. Aborting."
+          abort( "Aborting Vagrant command to prevent a critical mistake, do not use sudo/root with VVV." )
+        end
+      end
+    end
+
     v.customize ['modifyvm', :id, '--uartmode1', 'file', File.join(vagrant_dir, 'log/ubuntu-cloudimg-console.log')]
     v.customize ['modifyvm', :id, '--memory', vvv_config['vm_config']['memory']]
     v.customize ['modifyvm', :id, '--cpus', vvv_config['vm_config']['cores']]
@@ -398,21 +437,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # This is disabled, we had several contributors who ran into issues.
   # See: https://github.com/Varying-Vagrant-Vagrants/VVV/issues/1551
   config.ssh.insert_key = false
-
-  # Default Ubuntu Box
-  #
-  # This box is provided by Bento boxes via vagrantcloud.com and is a nicely sized
-  # box containing the Ubuntu 20.04 Focal 64 bit release. Once this box is downloaded
-  # to your host computer, it is cached for future use under the specified box name.
-  config.vm.box = 'bento/ubuntu-20.04'
   config.vm.box_check_update = false
-
-  # If we're at a contributor day, switch the base box to the prebuilt one
-  if defined? vvv_config['vm_config']['wordcamp_contributor_day_box']
-    if vvv_config['vm_config']['wordcamp_contributor_day_box'] == true
-      config.vm.box = 'vvv/contribute'
-    end
-  end
 
   # The Parallels Provider uses a different naming scheme.
   config.vm.provider :parallels do |_v, override|
@@ -422,7 +447,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     # this seems to be the most reliable way to detect whether or not we're
     # running under ARM64.
     if Etc.uname[:version].include? 'ARM64'
-      override.vm.box = 'mpasternak/focal64-arm'
+      override.vm.box = 'bento/ubuntu-20.04-arm64'
     end
   end
 
@@ -435,6 +460,36 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # Hyper-V uses a different base box.
   config.vm.provider :hyperv do |_v, override|
     override.vm.box = 'bento/ubuntu-20.04'
+  end
+
+  # Docker use image.
+  config.vm.provider :docker do |d, override|
+    d.image = 'pentatonicfunk/vagrant-ubuntu-base-images:20.04'
+    d.has_ssh = true
+    d.ports =  [ "80:80" ] # HTTP
+    d.ports += [ "443:443" ] # HTTPS
+    d.ports += [ "3306:3306" ] # MySQL
+    d.ports += [ "8025:8025" ] # Mailhog
+
+    ## Fix goodhosts aliases format for docker
+    override.goodhosts.aliases = { '127.0.0.1' => vvv_config['hosts'], '::1' => vvv_config['hosts'] }
+  end
+
+  # Virtualbox.
+  config.vm.provider :virtualbox do |_v, override|
+    # Default Ubuntu Box
+    #
+    # This box is provided by Bento boxes via vagrantcloud.com and is a nicely sized
+    # box containing the Ubuntu 20.04 Focal 64 bit release. Once this box is downloaded
+    # to your host computer, it is cached for future use under the specified box name.
+    override.vm.box = 'bento/ubuntu-20.04'
+
+    # If we're at a contributor day, switch the base box to the prebuilt one
+    if defined? vvv_config['vm_config']['wordcamp_contributor_day_box']
+      if vvv_config['vm_config']['wordcamp_contributor_day_box'] == true
+        override.vm.box = 'vvv/contribute'
+      end
+    end
   end
 
   if defined? vvv_config['vm_config']['box']
@@ -473,7 +528,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # Access to the guest machine is only available to your local host. To provide access to
   # other devices, a public network should be configured or port forwarding enabled.
   #
-  # Note: If your existing network is using the 192.168.50.x subnet, this default IP address
+  # Note: If your existing network is using the 192.168.56.x subnet, this default IP address
   # should be changed. If more than one VM is running through VirtualBox, including other
   # Vagrant machines, different subnets should be used for each.
   #
@@ -775,10 +830,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   vvv_config['utilities'].each do |name, extensions|
     extensions = {} unless extensions.is_a? Array
     extensions.each do |extension|
-      if extension == 'tideways'
-        vvv_config['hosts'] += ['tideways.vvv.test']
-        vvv_config['hosts'] += ['xhgui.vvv.test']
-      end
       config.vm.provision "extension-#{name}-#{extension}",
                           type: 'shell',
                           keep_color: true,
@@ -793,10 +844,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   vvv_config['extensions'].each do |name, extensions|
     extensions = {} unless extensions.is_a? Array
     extensions.each do |extension|
-      if extension == 'tideways'
-        vvv_config['hosts'] += ['tideways.vvv.test']
-        vvv_config['hosts'] += ['xhgui.vvv.test']
-      end
       config.vm.provision "extension-#{name}-#{extension}",
                           type: 'shell',
                           keep_color: true,
@@ -848,29 +895,29 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # located in the www/ directory and in config/config.yml.
   #
 
-  if Vagrant.has_plugin?('vagrant-goodhosts')
+  if config.vagrant.plugins.include? 'vagrant-goodhosts'
     config.goodhosts.aliases = vvv_config['hosts']
     config.goodhosts.remove_on_suspend = true
-  elsif Vagrant.has_plugin?('vagrant-hostsmanager')
+
+    # goodhosts already disables clean by default, but lets enforce this at both ends
+    config.goodhosts.disable_clean = true
+  elsif config.vagrant.plugins.include? 'vagrant-hostsmanager'
     config.hostmanager.aliases = vvv_config['hosts']
     config.hostmanager.enabled = true
     config.hostmanager.manage_host = true
     config.hostmanager.manage_guest = true
     config.hostmanager.ignore_private_ip = false
     config.hostmanager.include_offline = true
-  elsif Vagrant.has_plugin?('vagrant-hostsupdater')
+  elsif config.vagrant.plugins.include? 'vagrant-hostsupdater'
     # Pass the found host names to the hostsupdater plugin so it can perform magic.
     config.hostsupdater.aliases = vvv_config['hosts']
     config.hostsupdater.remove_on_suspend = true
-  else
-    show_check = true if %w[up halt resume suspend status provision reload].include? ARGV[0]
-    if show_check
-      puts ""
-      puts " X ! There is no hosts file vagrant plugin installed!"
-      puts " X You need the vagrant-goodhosts plugin (or HostManager/ HostsUpdater ) for domains to work in the browser"
-      puts " X Run 'vagrant plugin install --local' to fix this."
-      puts ""
-    end
+  elsif %w[up halt resume suspend status provision reload].include? ARGV[0]
+    puts ""
+    puts " X ! There is no hosts file vagrant plugin installed!"
+    puts " X You need the vagrant-goodhosts plugin (or HostManager/ HostsUpdater ) for domains to work in the browser"
+    puts " X Run 'vagrant plugin install --local' to fix this."
+    puts ""
   end
 
   # Vagrant Triggers
