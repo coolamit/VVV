@@ -40,6 +40,18 @@ def sudo_warnings
   # exit
 end
 
+
+def vvv_is_docker_present()
+  if `docker version`
+    return true
+  end
+  return false
+end
+
+def vvv_is_parallels_present()
+  return Vagrant.has_plugin?("vagrant-parallels")
+end
+
 vagrant_dir = __dir__
 show_logo = false
 branch_c = "\033[38;5;6m" # 111m"
@@ -214,12 +226,16 @@ vvv_config['general'] = {} unless vvv_config['general'].is_a? Hash
 
 defaults = {}
 defaults['memory'] = 2048
-defaults['cores'] = 1
+defaults['cores'] = 2
 defaults['provider'] = 'virtualbox'
 
-# if Arm default to docker
+# if Arm default to docker then parallels
 if Etc.uname[:version].include? 'ARM64'
-  defaults['provider'] = 'docker'
+  if vvv_is_parallels_present()
+    defaults['provider'] = 'parallels'
+  else
+    defaults['provider'] = 'docker'
+  end
 end
 
 # This should rarely be overridden, so it's not included in the config/default-config.yml file.
@@ -329,7 +345,7 @@ if show_logo
   when 'hyperv'
     provider_version = 'n/a'
   when 'docker'
-    provider_version = VagrantPlugins::DockerProvider::Driver.new.execute("docker", "-v").gsub("Docker version ", "")
+    provider_version = `docker -v`.gsub("Docker version ", "")
   else
     provider_version = '??'
   end
@@ -443,11 +459,9 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   config.vm.provider :parallels do |_v, override|
     override.vm.box = 'bento/ubuntu-20.04'
 
-    # Vagrant currently runs under Rosetta on M1 devices. As a result,
-    # this seems to be the most reliable way to detect whether or not we're
-    # running under ARM64.
+    # Pin the arm64 version of the box to a specific version we know has an arm build.
     if Etc.uname[:version].include? 'ARM64'
-      override.vm.box = 'bento/ubuntu-20.04-arm64'
+      config.vm.box_version = "202404.23.0"
     end
   end
 
@@ -495,6 +509,12 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   if defined? vvv_config['vm_config']['box']
     unless vvv_config['vm_config']['box'].nil?
       config.vm.box = vvv_config['vm_config']['box']
+    end
+  end
+
+  if defined? vvv_config['vm_config']['box_version']
+    unless vvv_config['vm_config']['box_version'].nil?
+      config.vm.box_version = vvv_config['vm_config']['box_version']
     end
   end
 

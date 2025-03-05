@@ -6,7 +6,44 @@ permalink: /docs/en-US/changelog/
 
 # Changelog
 
-## 3.13 ( 2024 TBA )
+## 3.15 ( 2025 TBD )
+
+## 3.14.1 ( 2025 February 23rd )
+
+### Enhancements
+
+* Upgraded MariaDB from 10.5 to 10.11 ( #2728 )
+* Provisioner/Hook timings now show milliseconds ( #2735 )
+* Added a `skip_site_provisioner_update` option to prevent site provisioners being overwritten by updates ( #2733 )
+* Only start services that aren't running in post-up scripts ( #2732 )
+* Added a new `box_version` parameter for `config.yml` ( #2749 )
+
+### Bug Fixes
+
+* VVV will check if Parallels is installed before defaulting to docker on Arm64/Apple Silicon due to issues with Docker detection ( #2722 )
+* Switched from Rackspace to Starburst services for MariaDB mirrors ( #2728 )
+* Switched from Starburst to OVH for MariaDB mirrors ( #2741 )
+* Fixes for service starts under some situations in Docker ( #2732 )
+* Fixed an issue with trailing slashes and site provisioners introduced in an earlier version (#2731)
+* Switched Parallels box to non-arm64 and pinned to a specific version for Arm devices ( #2749 )
+
+### Maintenance
+
+* Removed commented out subversion config lines that were flagged as a false positive security issue ( #2725 )
+* Adjusted the domains used in the network check to remove unused domains and add some that are used ( #2734 )
+
+## 3.13.2 ( 2024 July 19th )
+
+### Enhancements
+
+* VVV now shows a missing dashboard page with help when `www/default/index.php` is accidentally deleted instead of a HTTP forbidden error ( #2714 )
+
+### Bug Fixes
+
+* VVV will check if Docker is installed before defaulting to it on Arm64/Apple Silicon ( #2715 )
+* Fixed MySQL issues in GitHub Actions ( #2716 )
+
+## 3.13.1 ( 2024 June 16th )
 
 ### Enhancements
 
@@ -22,14 +59,17 @@ permalink: /docs/en-US/changelog/
 
 ### Maintenance
 
-* Switch the Parallels Arm64 box from `mpasternak/focal64-arm` to `bento/ubuntu-22.04-arm64` to match x86 boxes ( #2695 )
+* Switch the Parallels Arm64 box from `mpasternak/focal64-arm` to `bento/ubuntu-20.04-arm64` to match x86 boxes ( #2695 )
 
 ### Bug Fixes
 
 * The host file inside the VM was only adding sites with `127.0.0.1` addresses, now it adds the IPVv6 `::1` too ( #2689 )
+* Fixes for hosts file cleanup ( #2708 )
 * Removed old MacOS PR workflows, no runners available ( #2698 )
+* Replace an outdated Nginx signing key ( #2710 )
+* Don't sync clocks when using the docker provider ( #2711 )
 
-## 3.12 ( 2023 August 3rd )
+## 3.12.1 ( 2023 August 3rd )
 
 ### Enhancements
 
